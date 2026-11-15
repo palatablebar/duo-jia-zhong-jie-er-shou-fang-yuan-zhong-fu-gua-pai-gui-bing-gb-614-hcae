@@ -55,6 +55,49 @@ LISTING_STATUS_ORDER: list[str] = [
 ]
 
 
+class RecordKind(StrEnum):
+    """一条采集记录的来源性质：中介自己发布，还是渠道转载。"""
+
+    DIRECT = "direct"
+    REPOST = "repost"
+
+
+RECORD_KIND_LABELS: dict[str, str] = {
+    RecordKind.DIRECT.value: "直达发布",
+    RecordKind.REPOST.value: "渠道转载",
+}
+
+RECORD_KIND_ORDER: list[str] = [
+    RecordKind.DIRECT.value,
+    RecordKind.REPOST.value,
+]
+
+
+class ProvenanceStatus(StrEnum):
+    """转载记录的归并状态：能对齐原发布中介 vs 待补齐。"""
+
+    LINKED = "linked"
+    UNRESOLVED = "unresolved"
+
+
+PROVENANCE_STATUS_LABELS: dict[str, str] = {
+    ProvenanceStatus.LINKED.value: "已对齐原发布",
+    ProvenanceStatus.UNRESOLVED.value: "待补齐原发布",
+}
+
+PROVENANCE_STATUS_ORDER: list[str] = [
+    ProvenanceStatus.LINKED.value,
+    ProvenanceStatus.UNRESOLVED.value,
+]
+
+PROVENANCE_REASON_LABELS: dict[str, str] = {
+    "origin_agency_missing": "转载记录缺少原发布中介",
+    "origin_agency_unknown": "原发布中介不在已登记渠道中",
+    "origin_lid_missing": "转载记录缺少原挂牌编号",
+    "origin_listing_not_found": "原发布中介下找不到该挂牌编号",
+}
+
+
 class RunStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"

@@ -1,9 +1,15 @@
-"""一条原始挂牌：保留采集原文，同时存归一结果（归一由 backend 计算）。"""
+"""一条原始挂牌：保留采集原文，同时存归一结果（归一由 backend 计算）。
+
+``record_kind`` 区分中介自己发布的直达记录与平台/数据服务商的转载记录。
+转载记录保留 ``origin_agency_*`` / ``origin_lid``（原发布中介、原挂牌编号），
+能对齐到直达记录时 ``provenance_status=linked`` 且 ``source_listing_id`` 指向那条直达记录；
+对不齐时 ``provenance_status=unresolved``，留在来源台账、不进入报价与银行估价清单。
+"""
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models import Base
@@ -17,6 +23,22 @@ class Listing(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     agency_id: Mapped[int] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
     lid: Mapped[str] = mapped_column(String(40), index=True)
+
+    # ---- 来源链路：直达发布 vs 渠道转载 ----
+    record_kind: Mapped[str] = mapped_column(String(10), default="direct", index=True)
+    origin_agency_id: Mapped[int | None] = mapped_column(
+        ForeignKey("agencies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    origin_agency_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    origin_agency_raw: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    origin_lid: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    provenance_status: Mapped[str] = mapped_column(String(20), default="direct", index=True)
+    provenance_reason: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    source_listing_id: Mapped[int | None] = mapped_column(
+        ForeignKey("listings.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    is_quote: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    quote_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     community_raw: Mapped[str] = mapped_column(String(160))
     layout_raw: Mapped[str] = mapped_column(String(60))
     area_raw: Mapped[str] = mapped_column(String(60))

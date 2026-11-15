@@ -10,6 +10,7 @@ from src.routes.listings import router as listings_router
 from src.routes.overview import router as overview_router
 from src.routes.properties import router as properties_router
 from src.routes.reviews import router as reviews_router
+from src.routes.sources import router as sources_router
 from src.routes.runs import router as runs_router
 
 api_router = APIRouter()
@@ -22,4 +23,5 @@ api_router.include_router(properties_router)
 api_router.include_router(runs_router)
 api_router.include_router(reviews_router)
 api_router.include_router(exports_router)
+api_router.include_router(sources_router)
 api_router.include_router(audit_router)

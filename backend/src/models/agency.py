@@ -1,4 +1,8 @@
-"""中介 / 采集渠道：9 家挂牌来源的登记与采集口径。"""
+"""中介 / 采集渠道：9 家挂牌来源的登记与采集口径。
+
+``kind`` 决定该渠道采集到的记录默认是「直达发布」还是「转载」：
+``platform`` / ``feed`` 是转载渠道（平台、数据服务商），其余（``broker``）是中介自发布。
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -8,6 +12,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models import Base
 from src.utils.timeutil import utcnow
+
+REPOST_AGENCY_KINDS = ("platform", "feed")
 
 
 class Agency(Base):

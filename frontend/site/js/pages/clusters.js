@@ -36,6 +36,24 @@ function memberTable(members) {
     <tbody>${rows}</tbody></table></div>`;
 }
 
+function quoteTable(quotes) {
+  const rows = (quotes || [])
+    .map(
+      (quote) => `<tr>
+        <td>${esc(quote.agency_name)}<div class="mono muted">${esc(quote.agency_code)}</div></td>
+        <td><span class="mono">${esc(quote.lid)}</span><div class="mono muted">${esc(quote.price_raw)}</div></td>
+        <td class="num">${esc(wan(quote.price_num))}</td>
+        <td>${(quote.reposts || [])
+          .map((repost) => `<div class="mono muted">${esc(repost.agency_name)} · ${esc(repost.lid)}${repost.is_adopted_source ? '' : `（指向 ${esc(repost.source_lid || '')}）`}</div>`)
+          .join('') || '<span class="muted">无转载</span>'}</td>
+      </tr>`,
+    )
+    .join('');
+  return `<div class="members"><table class="data compact">
+    <thead><tr><th>采用发布的中介</th><th>采用的挂牌</th><th>报价</th><th>相应转载记录</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
 async function openCluster(view, ctx, summary) {
   let prop;
   try {
@@ -47,22 +65,26 @@ async function openCluster(view, ctx, summary) {
   const detail = prop.risk_detail || {};
   const { root } = drawer({
     title: `${prop.community} · ${prop.layout}`,
-    subtitle: `簇 #${prop.id} · ${prop.member_count} 条挂牌 / ${prop.agency_count} 家中介 · 置信 ${prop.confidence.toFixed(3)}`,
+    subtitle: `簇 #${prop.id} · ${prop.quote_count} 份报价 / ${prop.agency_count} 家中介 · 直达 ${prop.direct_count} + 转载 ${prop.linked_repost_count} · 置信 ${prop.confidence.toFixed(3)}`,
     wide: true,
     body: `${kv([
       ['面积众数', `<span class="mono">${esc(prop.area_mode)} ㎡</span>（${esc(prop.area_min)}–${esc(prop.area_max)}）`],
       ['价格中位', `<span class="mono">${esc(wan(prop.price_median))}</span>（${esc(wan(prop.price_min))}–${esc(wan(prop.price_max))}）`],
       ['价差', `<span class="mono">${esc(prop.spread_wan)} 万</span> · 离散度 ${esc(prop.dispersion)}`],
-      ['中介', esc((prop.agency_names || []).join(' / ') || '—')],
+      ['中介（去重·报价）', `${esc(prop.agency_count)} 家 / ${esc(prop.quote_count)} 份报价`],
+      ['中介名单', esc((prop.agency_names || []).join(' / ') || '—')],
+      ['记录构成', `直达 ${esc(prop.direct_count)} 条（含同中介重复 ${esc(prop.direct_count - prop.quote_count)} 条） · 对齐转载 ${esc(prop.linked_repost_count)} 条 · 全部记录 ${esc(prop.record_count)} 条`],
       ['风险分', `${riskMeter(prop)} ${badge(riskTone(prop.risk_level), prop.risk_level_label)}`],
       ['风险标签', (prop.risk_tags || []).map((tag) => `<span class="badge ${tagTone(tag)}">${esc(ENUMS.riskTag[tag] || tag)}</span>`).join(' ') || '—'],
       ['钓鱼价挂牌', (detail.bait_lids || []).length ? `<span class="mono">${esc(detail.bait_lids.join(' / '))}</span>` : '—'],
       ['僵尸挂牌', (detail.stale_lids || []).length ? `<span class="mono">${esc(detail.stale_lids.join(' / '))}</span>` : '—'],
       ['golden record 更新', fmtTime(prop.updated_at)],
     ])}
-    <h3 style="margin:14px 0 8px;font-size:0.95rem">成员对照（算法 A 连边结果）</h3>
+    <h3 style="margin:14px 0 8px;font-size:0.95rem">每个中介采用的发布（一中介一份报价）</h3>
+    ${quoteTable(prop.quotes || [])}
+    <h3 style="margin:14px 0 8px;font-size:0.95rem">成员对照（算法 A 连边结果 · 仅直达记录）</h3>
     ${memberTable(prop.members || [])}
-    <p class="note">面积取众数、价格取中位、中介数去重计数；偏离 = (该条价格 − 簇中位) / 簇中位，低于 −10% 记为钓鱼价。</p>`,
+    <p class="note">同中介多条的重复发布与已对齐的转载只作佐证，不参与价格中位与中介计数；面积取众数、价格取中位、中介数去重计数；偏离 = (该条价格 − 簇中位) / 簇中位，低于 −10% 记为钓鱼价。</p>`,
     footer: `<button class="btn ghost" data-listings>查看该簇全部挂牌</button>`,
   });
   root.querySelector('[data-listings]')?.addEventListener('click', () => {
@@ -140,7 +162,7 @@ export const clustersPage = {
             { key: 'area_mode', label: '面积', className: 'num', render: (row) => `${esc(row.area_mode)} ㎡` },
             { key: 'price_median', label: '价格中位', className: 'num', render: (row) => esc(wan(row.price_median)) },
             { key: 'spread_wan', label: '价差', className: 'num', render: (row) => `${esc(row.spread_wan)} 万` },
-            { key: 'member_count', label: '成员 / 中介', className: 'num', render: (row) => `${esc(row.member_count)} / ${esc(row.agency_count)}` },
+            { key: 'quote_count', label: '报价 / 中介', className: 'num', render: (row) => `${esc(row.quote_count)} / ${esc(row.agency_count)}${row.linked_repost_count ? ` <span class="badge info">佐证 ${esc(row.linked_repost_count)}</span>` : ''}` },
             { key: 'confidence', label: '置信', className: 'num', render: (row) => row.confidence.toFixed(3) },
             { key: 'risk', label: '风险', render: (row) => `${riskBadge(row)} ${(row.risk_tags || []).map((tag) => `<span class="badge ${tagTone(tag)}">${esc(ENUMS.riskTag[tag] || tag)}</span>`).join(' ')}` },
           ],

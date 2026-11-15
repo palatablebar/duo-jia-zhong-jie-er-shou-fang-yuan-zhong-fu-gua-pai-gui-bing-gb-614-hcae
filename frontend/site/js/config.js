@@ -7,12 +7,12 @@ export const BRAND = {
   title: '多家中介二手房源重复挂牌归并',
   org: '安家数据 · 房源中台',
   edition: 'PROPERTY WINDOW · 2026',
-  subtitle: '9 家中介的挂牌在这里合成一份 golden record：同一套房只留一条主档，价差与僵尸挂牌单独挑出来',
+  subtitle: '6 家门店 + 3 家转载渠道的挂牌在这里合成一份 golden record：同一套房只留一条主档，同一中介只算一份报价',
   loginLead: '估价师以前要在 4 条几乎一样的挂牌里挑一条，还得自己算价差。现在系统先把它们认成同一套房。',
   loginPoints: [
     ['01', '字段解析归一：89.5㎡ / 89.5平米 / 建面89.5 归一成同一个数字。'],
-    ['02', 'blocking + 相似度 + 并查集：同小区同户型 ±5㎡ 内连边，阈值 0.80。'],
-    ['03', 'golden record 取价格中位、面积众数、中介去重计数，风险簇进复核队列。'],
+    ['02', '来源链路：转载保留原发布中介 + 原挂牌编号，能对上直达的只作佐证。'],
+    ['03', 'golden record 取价格中位、面积众数，同一中介只算一份报价，待补齐转载留在来源台账。'],
   ],
 };
 
@@ -20,8 +20,9 @@ export const NAV = [
   { to: '#/overview', no: '01', label: '总览', permission: 'overview:read' },
   { to: '#/agencies', no: '02', label: '中介与采集', permission: 'agency:read' },
   { to: '#/listings', no: '03', label: '挂牌明细', permission: 'listing:read' },
-  { to: '#/clusters', no: '04', label: '归并簇', permission: 'property:read' },
-  { to: '#/reviews', no: '05', label: '复核与导出', permission: 'review:read' },
+  { to: '#/sources', no: '04', label: '来源台账', permission: 'listing:read' },
+  { to: '#/clusters', no: '05', label: '归并簇', permission: 'property:read' },
+  { to: '#/reviews', no: '06', label: '复核与导出', permission: 'review:read' },
 ];
 
 export const ROLE_LABELS = {
@@ -47,6 +48,14 @@ export const ENUMS = {
   riskTag: { bait: '钓鱼价', stale: '僵尸挂牌', spread: '价格离散' },
   listingStatus: { active: '在售', sold: '已成交未下架', off_market: '已下架' },
   agencyKind: { broker: '中介门店', platform: '信息平台', feed: '数据服务商' },
+  recordKind: { direct: '直达发布', repost: '渠道转载' },
+  provenanceStatus: { direct: '直达发布', linked: '已对齐原发布', unresolved: '待补齐原发布' },
+  provenanceReason: {
+    origin_agency_missing: '缺少原发布中介',
+    origin_agency_unknown: '原发布中介未登记',
+    origin_lid_missing: '缺少原挂牌编号',
+    origin_listing_not_found: '原挂牌编号对不上',
+  },
   runStatus: { queued: '排队中', running: '执行中', success: '成功', partial: '部分成功', failed: '失败' },
   reviewStatus: { pending: '待复核', confirmed: '已确认', dismissed: '已驳回' },
   reviewReason: { bait: '疑似钓鱼价', stale: '疑似僵尸挂牌', spread: '簇内价差异常', manual: '人工抽查' },
@@ -59,6 +68,14 @@ export function can(role, permission) {
 
 export function riskTone(level) {
   return { high: 'danger', medium: 'warn', low: 'ok', none: '' }[level] ?? '';
+}
+
+export function recordTone(kind) {
+  return { direct: 'ok', repost: 'info' }[kind] || '';
+}
+
+export function provenanceTone(status) {
+  return { direct: 'ok', linked: 'info', unresolved: 'warn' }[status] || '';
 }
 
 export function statusTone(status) {

@@ -178,10 +178,21 @@ def _median(values: Sequence[int]) -> int:
     return int(round((ordered[middle - 1] + ordered[middle]) / 2.0))
 
 
-def golden_record(normalized: Sequence[dict], members: Sequence[int], agency_ids: Sequence[int]) -> dict:
-    """簇内聚合出 golden record。"""
-    areas = [float(normalized[i]["area_num"]) for i in members if normalized[i].get("area_num") is not None]
-    prices = [int(normalized[i]["price_num"]) for i in members if normalized[i].get("price_num")]
+def golden_record(
+    normalized: Sequence[dict],
+    members: Sequence[int],
+    agency_ids: Sequence[int],
+    quote_members: Sequence[int] | None = None,
+) -> dict:
+    """簇内聚合出 golden record。
+
+    ``quote_members`` 是簇内被选为报价的直达记录（每个中介一份）。价格中位、面积众数、
+    中介数只由这些报价参与；转载记录与同中介的重复发布只作佐证，不放大中位数和中介数。
+    不传 ``quote_members`` 时退化为全部成员都是报价（保持纯函数单测的旧口径）。
+    """
+    quotes = list(quote_members if quote_members is not None else members)
+    areas = [float(normalized[i]["area_num"]) for i in quotes if normalized[i].get("area_num") is not None]
+    prices = [int(normalized[i]["price_num"]) for i in quotes if normalized[i].get("price_num")]
     area_counter = Counter(round(value, 1) for value in areas)
     if area_counter:
         area_mode = sorted(area_counter.items(), key=lambda item: (-item[1], item[0]))[0][0]
@@ -191,8 +202,8 @@ def golden_record(normalized: Sequence[dict], members: Sequence[int], agency_ids
     median_price = _median(prices)
     p10 = _percentile(ordered_prices, 0.10)
     p90 = _percentile(ordered_prices, 0.90)
-    communities = Counter(normalized[i].get("community_norm") or "" for i in members)
-    layouts = Counter(normalized[i].get("layout_norm") or "" for i in members)
+    communities = Counter(normalized[i].get("community_norm") or "" for i in quotes)
+    layouts = Counter(normalized[i].get("layout_norm") or "" for i in quotes)
     return {
         "community": sorted(communities.items(), key=lambda item: (-item[1], item[0]))[0][0] if communities else "",
         "layout": sorted(layouts.items(), key=lambda item: (-item[1], item[0]))[0][0] if layouts else "",
@@ -206,8 +217,9 @@ def golden_record(normalized: Sequence[dict], members: Sequence[int], agency_ids
         "price_p90": p90,
         "spread": p90 - p10,
         "dispersion": round((p90 - p10) / median_price, 4) if median_price else 0.0,
-        "agency_count": len(set(agency_ids[i] for i in members)),
+        "agency_count": len(set(agency_ids[i] for i in quotes)),
         "member_count": len(members),
+        "quote_count": len(quotes),
     }
 
 
@@ -215,8 +227,14 @@ def resolve(
     normalized: Sequence[dict],
     agency_ids: Sequence[int],
     threshold: float = SIMILARITY_THRESHOLD,
+    record_meta: Sequence[dict] | None = None,
 ) -> dict:
-    """跑完整算法 A：返回簇、边、指标。"""
+    """跑完整算法 A：返回簇、边、指标。
+
+    ``record_meta``（可选）：每条归一记录对应的原始记录元数据
+    ``{"id", "status", "record_kind", "agency_id"}``。传了就按「同一中介只算一份报价」
+    先挑报价再聚合 golden record；不传则全部成员视为报价（纯函数单测口径）。
+    """
     pairs = candidate_pairs(normalized)
     union_find = UnionFind(len(normalized))
     edges: list[dict] = []
@@ -237,11 +255,15 @@ def resolve(
         member_set = set(members)
         member_scores = [edge["score"] for edge in edges if edge["left"] in member_set and edge["right"] in member_set]
         confidence = max(member_scores) if member_scores else 1.0
+        quote_indexes = members
+        if record_meta is not None:
+            quote_indexes = _select_quote_indexes(members, record_meta)
         clusters.append(
             {
                 "members": members,
+                "quotes": quote_indexes,
                 "confidence": round(confidence, 4),
-                "golden": golden_record(normalized, members, agency_ids),
+                "golden": golden_record(normalized, members, agency_ids, quote_indexes),
             }
         )
 
@@ -256,3 +278,25 @@ def resolve(
         "dedup_rate": round(1 - len(clusters) / len(normalized), 4) if normalized else 0.0,
     }
     return {"clusters": clusters, "edges": edges, "metrics": metrics}
+
+
+_STATUS_PRIORITY = {"active": 0, "sold": 1, "off_market": 2}
+
+
+def _select_quote_indexes(members: Sequence[int], record_meta: Sequence[dict]) -> list[int]:
+    """同簇内每个中介只留一份报价：只认直达记录，在售优先、入库更晚优先。"""
+    chosen: dict[int, int] = {}
+
+    def _key(meta: dict) -> tuple[int, int]:
+        return _STATUS_PRIORITY.get(str(meta.get("status") or "active"), 3), -int(meta.get("id") or 0)
+
+    for index in members:
+        meta = record_meta[index] or {}
+        if meta.get("record_kind", "direct") != "direct":
+            continue
+        agency_id = int(meta.get("agency_id", -1))
+        current = chosen.get(agency_id)
+        if current is None or _key(meta) < _key(record_meta[current] or {}):
+            chosen[agency_id] = index
+    return [chosen[agency_id] for agency_id in sorted(chosen)]
+

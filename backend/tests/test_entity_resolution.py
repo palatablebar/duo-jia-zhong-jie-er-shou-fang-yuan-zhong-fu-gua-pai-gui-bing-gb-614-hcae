@@ -80,6 +80,44 @@ def test_golden_record_median_mode_and_agency_count():
     assert golden["member_count"] == 3
 
 
+def test_golden_record_prices_only_selected_quotes():
+    """同一中介两条直达、外加一条转载时：价格中位与中介数只按 3 份报价算。"""
+    rows = [
+        _row(area="89.5", price="598万"),
+        _row(area="89.5", price="602万"),
+        _row(area="89.5", price="606万"),
+        _row(area="89.5", price="598万"),  # 同中介重复发布
+        _row(area="89.5", price="598万"),  # 转载
+    ]
+    meta = [
+        {"id": 1, "agency_id": 11, "status": "active", "record_kind": "direct"},
+        {"id": 2, "agency_id": 22, "status": "active", "record_kind": "direct"},
+        {"id": 3, "agency_id": 33, "status": "active", "record_kind": "direct"},
+        {"id": 4, "agency_id": 11, "status": "active", "record_kind": "direct"},
+        {"id": 5, "agency_id": 44, "status": "active", "record_kind": "repost"},
+    ]
+    result = er.resolve(rows, [11, 22, 33, 11, 44], record_meta=meta)
+    golden = result["clusters"][0]["golden"]
+    assert golden["member_count"] == 5
+    assert golden["quote_count"] == 3
+    assert golden["agency_count"] == 3
+    assert golden["price_min"] == 5_980_000
+    assert golden["price_max"] == 6_060_000
+    # 报价是每家入库更晚的那条：中介 11 的 id=4
+    assert result["clusters"][0]["quotes"] == [3, 1, 2]
+
+
+def test_quote_prefers_active_over_sold():
+    rows = [_row(area="89.5", price="598万"), _row(area="89.5", price="620万")]
+    meta = [
+        {"id": 1, "agency_id": 11, "status": "sold", "record_kind": "direct"},
+        {"id": 2, "agency_id": 11, "status": "active", "record_kind": "direct"},
+    ]
+    result = er.resolve(rows, [11, 11], record_meta=meta)
+    assert result["clusters"][0]["quotes"] == [1]
+    assert result["clusters"][0]["golden"]["price_median"] == 6_200_000
+
+
 def test_deterministic_resolution():
     rows = [_row(area="89.5", price="598万"), _row(area="89.5", price="602万"), _row(area="118", price="780万")]
     first = er.resolve(rows, [1, 2, 3])

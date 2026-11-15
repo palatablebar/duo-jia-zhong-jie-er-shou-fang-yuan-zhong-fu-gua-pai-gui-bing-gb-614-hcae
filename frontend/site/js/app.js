@@ -6,6 +6,7 @@ import loginPage from './pages/login.js';
 import overviewPage from './pages/overview.js';
 import agenciesPage from './pages/agencies.js';
 import listingsPage from './pages/listings.js';
+import sourcesPage from './pages/sources.js';
 import clustersPage from './pages/clusters.js';
 import reviewsPage from './pages/reviews.js';
 
@@ -13,6 +14,7 @@ const routes = [
   { path: '#/overview', page: overviewPage, permission: 'overview:read' },
   { path: '#/agencies', page: agenciesPage, permission: 'agency:read' },
   { path: '#/listings', page: listingsPage, permission: 'listing:read' },
+  { path: '#/sources', page: sourcesPage, permission: 'listing:read' },
   { path: '#/clusters', page: clustersPage, permission: 'property:read' },
   { path: '#/reviews', page: reviewsPage, permission: 'review:read' },
 ];

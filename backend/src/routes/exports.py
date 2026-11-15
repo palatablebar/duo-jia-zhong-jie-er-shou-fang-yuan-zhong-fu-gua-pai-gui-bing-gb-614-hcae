@@ -7,6 +7,7 @@ from src.config.database import get_db
 from src.constants.roles import EXPORT_ROLES
 from src.controllers import export_controller
 from src.middlewares.rbac import require_roles
+from src.services import export_service
 
 router = APIRouter(prefix="/exports", tags=["exports"])
 
@@ -28,6 +29,15 @@ def listings_csv(
     principal: dict = Depends(require_roles(*EXPORT_ROLES)),
 ):
     return export_controller.listings_csv(db, agency_id, principal, request)
+
+
+@router.get("/reconcile")
+def reconcile(
+    db: Session = Depends(get_db),
+    principal: dict = Depends(require_roles(*EXPORT_ROLES)),
+) -> dict:
+    """对账读数：中介数 / 报价数 / 三个导出行数必须一致（不改库，不记审计）。"""
+    return export_service.reconciliation(db)
 
 
 @router.get("/reviews.csv")

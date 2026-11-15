@@ -48,6 +48,17 @@ CREATE TABLE listings (
     id               INT AUTO_INCREMENT PRIMARY KEY,
     agency_id        INT          NOT NULL,
     lid              VARCHAR(40)  NOT NULL,
+    -- 来源链路：直达发布 vs 渠道转载
+    record_kind      VARCHAR(10)  NOT NULL DEFAULT 'direct',  -- direct / repost
+    origin_agency_id INT,
+    origin_agency_code VARCHAR(40),
+    origin_agency_raw  VARCHAR(160),
+    origin_lid       VARCHAR(40),
+    provenance_status VARCHAR(20) NOT NULL DEFAULT 'direct',  -- direct / linked / unresolved
+    provenance_reason VARCHAR(40),
+    source_listing_id INT,
+    is_quote         BOOLEAN      NOT NULL DEFAULT FALSE,
+    quote_rank       INT,
     community_raw    VARCHAR(160) NOT NULL,
     layout_raw       VARCHAR(60)  NOT NULL,
     area_raw         VARCHAR(60)  NOT NULL,
@@ -74,7 +85,9 @@ CREATE TABLE listings (
     created_at       DATETIME     NOT NULL,
     updated_at       DATETIME     NOT NULL,
     CONSTRAINT uq_listings_agency_lid UNIQUE (agency_id, lid),
-    CONSTRAINT fk_listings_agency FOREIGN KEY (agency_id) REFERENCES agencies(id) ON DELETE CASCADE
+    CONSTRAINT fk_listings_agency FOREIGN KEY (agency_id) REFERENCES agencies(id) ON DELETE CASCADE,
+    CONSTRAINT fk_listings_origin_agency FOREIGN KEY (origin_agency_id) REFERENCES agencies(id) ON DELETE SET NULL,
+    CONSTRAINT fk_listings_source FOREIGN KEY (source_listing_id) REFERENCES listings(id) ON DELETE SET NULL
 );
 
 CREATE TABLE properties (
@@ -93,6 +106,10 @@ CREATE TABLE properties (
     spread       INT,
     dispersion   DOUBLE,
     agency_count INT,
+    quote_count  INT,
+    direct_count INT,
+    linked_repost_count INT,
+    record_count INT,
     member_count INT,
     confidence   DOUBLE,
     risk_score   INT          NOT NULL DEFAULT 0,
@@ -108,6 +125,27 @@ CREATE TABLE properties (
 
 ALTER TABLE listings
     ADD CONSTRAINT fk_listings_property FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE SET NULL;
+
+CREATE TABLE source_records (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    listing_id          INT          NOT NULL UNIQUE,
+    agency_id           INT          NOT NULL,
+    lid                 VARCHAR(40)  NOT NULL,
+    record_kind         VARCHAR(10)  NOT NULL DEFAULT 'repost',
+    origin_agency_id    INT,
+    origin_agency_code  VARCHAR(40),
+    origin_agency_raw   VARCHAR(160),
+    origin_lid          VARCHAR(40),
+    provenance_status   VARCHAR(20)  NOT NULL DEFAULT 'unresolved',  -- linked / unresolved
+    provenance_reason   VARCHAR(40),
+    source_listing_id   INT,
+    property_id         INT,
+    created_at          DATETIME     NOT NULL,
+    updated_at          DATETIME     NOT NULL,
+    CONSTRAINT fk_source_records_listing FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+    CONSTRAINT fk_source_records_agency FOREIGN KEY (agency_id) REFERENCES agencies(id) ON DELETE CASCADE,
+    CONSTRAINT fk_source_records_property FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE SET NULL
+);
 
 CREATE TABLE reviews (
     id          INT AUTO_INCREMENT PRIMARY KEY,

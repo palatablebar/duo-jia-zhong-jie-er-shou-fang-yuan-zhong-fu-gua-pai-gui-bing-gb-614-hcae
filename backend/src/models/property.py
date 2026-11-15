@@ -29,6 +29,11 @@ class Property(Base):
     dispersion: Mapped[float] = mapped_column(Float, default=0.0)
     agency_count: Mapped[int] = mapped_column(Integer, default=0)
     member_count: Mapped[int] = mapped_column(Integer, default=0)
+    # ---- 来源链路口径：中介数/报价数只算直达记录，转载只作佐证 ----
+    quote_count: Mapped[int] = mapped_column(Integer, default=0)
+    direct_count: Mapped[int] = mapped_column(Integer, default=0)
+    linked_repost_count: Mapped[int] = mapped_column(Integer, default=0)
+    record_count: Mapped[int] = mapped_column(Integer, default=0)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     risk_score: Mapped[int] = mapped_column(Integer, default=0, index=True)
     risk_level: Mapped[str] = mapped_column(String(10), default="none", index=True)

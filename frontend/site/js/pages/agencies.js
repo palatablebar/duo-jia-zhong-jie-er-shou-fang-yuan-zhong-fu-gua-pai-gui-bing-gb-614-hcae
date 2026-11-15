@@ -8,7 +8,7 @@ function openAgency(view, ctx, agency) {
   const editable = can(ctx.user.role, 'agency:write');
   const { root, close } = drawer({
     title: agency.name,
-    subtitle: `${agency.code} · ${agency.kind_label} · 挂牌 ${agency.listing_count} 条`,
+    subtitle: `${agency.code} · ${agency.kind_label} · 采集 ${agency.listing_count} 条${agency.repost_count ? ` · 转载 ${agency.repost_count}` : ''}`,
     body: `${kv([
       ['接入方式', esc(agency.kind_label)],
       ['采集入口', agency.endpoint ? `<span class="mono">${esc(agency.endpoint)}</span>` : '—'],
@@ -114,7 +114,7 @@ export const agenciesPage = {
         <div class="panel-head">
           <h2>中介与采集</h2>
           <div style="display:flex;gap:8px;align-items:center">
-            <span class="meta">${data.total} 家 · ${totalListings} 条挂牌</span>
+            <span class="meta">${data.total} 个渠道 · ${totalListings} 条采集记录</span>
             ${can(ctx.user.role, 'agency:write') ? '<button class="btn sm accent" id="new-agency">登记渠道</button>' : ''}
           </div>
         </div>
@@ -131,7 +131,12 @@ export const agenciesPage = {
             { key: 'name', label: '中介 / 渠道', render: (row) => `<b>${esc(row.name)}</b><div class="mono muted">${esc(row.code)}</div>` },
             { key: 'kind_label', label: '接入方式' },
             { key: 'endpoint', label: '采集入口', render: (row) => `<span class="mono muted">${esc(row.endpoint || '—')}</span>` },
-            { key: 'listing_count', label: '挂牌数', className: 'num' },
+            {
+              key: 'listing_count',
+              label: '采集 / 报价 / 转载',
+              className: 'num',
+              render: (row) => (row.kind === 'broker' ? `${esc(row.listing_count)} / <b>${esc(row.quote_count)}</b>` : `${esc(row.listing_count)} / — / <b>${esc(row.repost_count)}</b>`),
+            },
             { key: 'last_listing_at', label: '最近采集', render: (row) => fmtTime(row.last_listing_at || row.last_synced_at) },
             { key: 'enabled', label: '状态', render: (row) => statusBadge(row) },
           ],

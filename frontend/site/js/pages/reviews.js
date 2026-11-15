@@ -73,19 +73,21 @@ async function auditPanel(view, ctx) {
 
 export const reviewsPage = {
   async render(view, ctx) {
+    const canExport = can(ctx.user.role, 'export:read');
     let data;
     let overview;
+    let reconcile = null;
     try {
-      [data, overview] = await Promise.all([
+      [data, overview, reconcile] = await Promise.all([
         api.get('/api/reviews', { status: state.status, reason: state.reason, severity: state.severity, limit: 50 }),
         api.get('/api/overview'),
+        canExport ? api.get('/api/exports/reconcile') : Promise.resolve(null),
       ]);
     } catch (err) {
       view.innerHTML = errorBox(errorMessage(err));
       view.querySelector('#retry-btn')?.addEventListener('click', () => reviewsPage.render(view, ctx));
       return;
     }
-    const canExport = can(ctx.user.role, 'export:read');
     view.innerHTML = `
       <section class="panel">
         <div class="panel-head">
@@ -125,16 +127,18 @@ export const reviewsPage = {
       </section>
 
       ${
-        canExport
+        canExport && reconcile
           ? `<section class="panel">
               <div class="panel-head"><h2>导出与口径</h2><span class="meta">CSV · UTF-8 BOM</span></div>
               <div class="panel-body" style="display:grid;gap:10px">
-                <p class="note">归并簇 CSV 含面积众数、价格中位、价差、离散度、风险分与两个算法命中的挂牌编号；挂牌明细 CSV 同时保留采集原文与归一结果，方便银行侧复核口径。</p>
+                <p class="note"><b>归并簇 CSV 是银行估价清单</b>：只有入簇的房源，报价数（去重中介）、采用发布数、佐证转载数与采用发布编号。挂牌明细 CSV 是完整来源台账（含未对齐的转载），用于逐条追溯，不作为估价清单。</p>
                 <div class="kv">
-                  <dt>挂牌数</dt><dd class="mono">${esc(overview.listing_total)} 条</dd>
-                  <dt>归并簇</dt><dd class="mono">${esc(overview.cluster_total)} 个（多成员 ${esc(overview.multi_cluster_total)}）</dd>
-                  <dt>去重率</dt><dd class="mono">${esc(pct(overview.dedup_rate))}</dd>
-                  <dt>风险簇</dt><dd class="mono">${esc(overview.risk_total)} 个 · 待复核 ${esc(overview.pending_total)} 张</dd>
+                  <dt>采集记录</dt><dd class="mono" data-testid="reconcile-records">${esc(reconcile.record_count)} 条 = 直达 ${esc(reconcile.direct_count)} + 已对齐转载 ${esc(reconcile.linked_repost_count)} + 待补齐转载 ${esc(reconcile.unresolved_repost_count)}</dd>
+                  <dt>中介数（去重）</dt><dd class="mono" data-testid="reconcile-agencies">${esc(reconcile.agency_count)} 家</dd>
+                  <dt>报价数</dt><dd class="mono" data-testid="reconcile-quotes">${esc(reconcile.quote_count)} 份（采用发布行 ${esc(reconcile.quote_rows)} 行）</dd>
+                  <dt>导出行数</dt><dd class="mono">簇 ${esc(reconcile.cluster_rows)} 行 · 挂牌 ${esc(reconcile.listing_rows)} 行 · 复核 ${esc(reconcile.review_rows)} 行</dd>
+                  <dt>对账</dt><dd>${badge(reconcile.balanced ? 'ok' : 'danger', reconcile.balanced ? '中介数 = 报价数 = 采用发布行，记录数守恒' : '对不上，请重算核对')}</dd>
+                  <dt>归并簇</dt><dd class="mono">${esc(overview.cluster_total)} 个（多成员 ${esc(overview.multi_cluster_total)}） · 风险 ${esc(overview.risk_total)} 个</dd>
                 </div>
               </div>
             </section>`

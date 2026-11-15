@@ -15,7 +15,11 @@ def get_agency(db: Session, agency_id: int) -> dict:
     agency = agency_service.get_agency(db, agency_id)
     stats = agency_service.listing_stats(db)
     return agency_service.serialize(
-        agency, stats.get(agency.id, {}).get("count", 0), stats.get(agency.id, {}).get("last_at")
+        agency,
+        stats.get(agency.id, {}).get("count", 0),
+        stats.get(agency.id, {}).get("last_at"),
+        stats.get(agency.id, {}).get("quote_count", 0),
+        stats.get(agency.id, {}).get("repost_count", 0),
     )
 
 
@@ -51,5 +55,9 @@ def update_agency(db: Session, agency_id: int, payload: dict, principal: dict, r
     db.commit()
     stats = agency_service.listing_stats(db)
     return agency_service.serialize(
-        agency, stats.get(agency.id, {}).get("count", 0), stats.get(agency.id, {}).get("last_at")
+        agency,
+        stats.get(agency.id, {}).get("count", 0),
+        stats.get(agency.id, {}).get("last_at"),
+        stats.get(agency.id, {}).get("quote_count", 0),
+        stats.get(agency.id, {}).get("repost_count", 0),
     )

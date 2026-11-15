@@ -5,9 +5,9 @@ import { barList, badge, emptyState, errorBox, errorMessage, esc, fmtTime, trend
 function heroTags(data) {
   return `<div class="hero-tags">
     <div class="price-tag">
-      <span class="k">挂牌原文</span>
-      <span class="v" data-testid="listing-total">${esc(data.listing_total)}</span>
-      <span class="hint">${esc(data.agency_total)} 家中介的原始挂牌条数</span>
+      <span class="k">采集记录</span>
+      <span class="v" data-testid="listing-total">${esc(data.record_total)}</span>
+      <span class="hint">${esc(data.agency_total)} 个渠道 · 直达 ${esc(data.direct_total)} + 转载 ${esc(data.repost_total)}</span>
     </div>
     <div class="price-tag alt">
       <span class="k">归并后的房源</span>
@@ -15,14 +15,14 @@ function heroTags(data) {
       <span class="hint">多成员簇 ${esc(data.multi_cluster_total)} 个 · 其余为独挂</span>
     </div>
     <div class="price-tag">
-      <span class="k">去重率</span>
-      <span class="v" data-testid="dedup-rate">${esc(pct(data.dedup_rate))}</span>
-      <span class="hint">1 − 簇数 / 挂牌数（算法 A 计算）</span>
+      <span class="k">报价 / 中介</span>
+      <span class="v" data-testid="dedup-rate">${esc(data.quote_total)}</span>
+      <span class="hint">同一中介一簇只算一份 · 去重率 ${esc(pct(data.dedup_rate))}</span>
     </div>
     <div class="price-tag alt">
       <span class="k">风险簇 / 待复核</span>
       <span class="v" data-testid="risk-total">${esc(data.risk_total)}</span>
-      <span class="hint">待复核 ${esc(data.pending_total)} 张 · 算法 B 分诊</span>
+      <span class="hint">待复核 ${esc(data.pending_total)} 张 · 待补齐转载 ${esc(data.unresolved_repost_total)} 条</span>
     </div>
   </div>`;
 }
@@ -32,9 +32,9 @@ function coverage(data) {
   return `<div class="coverage">${data.agencies
     .map(
       (item) => `<div class="coverage-row">
-        <span class="name" title="${esc(item.name)}">${esc(item.name)}</span>
+        <span class="name" title="${esc(item.name)}">${esc(item.name)}${item.kind === 'broker' ? '' : ' <span class="chip">转载</span>'}</span>
         <div class="track"><div class="fill" style="width:${Math.round((item.listing_count / max) * 100)}%"></div></div>
-        <span class="mono" style="text-align:right">${esc(item.listing_count)}</span>
+        <span class="mono" style="text-align:right">${esc(item.kind === 'broker' ? item.quote_count : item.repost_count)}</span>
       </div>`,
     )
     .join('')}</div>`;
@@ -89,7 +89,7 @@ export const overviewPage = {
 
       <div class="grid-2">
         <section class="panel">
-          <div class="panel-head"><h2>中介覆盖</h2><span class="meta">${esc(data.agency_total)} 家中介 · 每家 60 条</span></div>
+          <div class="panel-head"><h2>渠道覆盖</h2><span class="meta">${esc(data.agency_total)} 个渠道 · ${esc(data.agencies.filter((item) => item.kind !== 'broker').length)} 家转载</span></div>
           <div class="panel-body">${coverage(data)}</div>
         </section>
         <section class="panel">
@@ -131,7 +131,7 @@ export const overviewPage = {
                     <dt>去重率</dt><dd class="mono">${esc(pct(latest.dedup_rate))}</dd>
                     <dt>风险簇</dt><dd>${badge(riskTone('medium'), `${latest.risk_count} 个`)}</dd>
                   </div>`
-                : emptyState({ title: '还没有归并记录', hint: '先在「中介与采集」确认 9 家渠道，再去「归并簇」重算。' })
+                : emptyState({ title: '还没有归并记录', hint: '先在「中介与采集」确认渠道，再去「归并簇」重算。' })
             }
           </div>
         </section>

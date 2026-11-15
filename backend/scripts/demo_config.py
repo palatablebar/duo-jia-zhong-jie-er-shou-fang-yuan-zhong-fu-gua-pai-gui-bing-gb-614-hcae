@@ -1,9 +1,12 @@
 """演示账号与种子数据集（确定性生成，不依赖数据库）。
 
 数据集口径（与 batch-plan gb-614 验收一致）：
-  9 家中介 × 60 条挂牌 = 540 条原始挂牌 → 386 个房源簇（41 个多成员簇）；
+- 5 家中介门店（broker）+ 4 家转载渠道（2 个信息平台 + 2 个数据服务商）；
+- 386 个房源簇 = 540 条直达发布 + 32 条同中介重复发布 + 72 条转载（共 644 条采集记录）；
   其中「翠湖名邸 3-2-1 89.5㎡」在 4 家中介交叉命中、价差 12 万；
-  1 个簇含 2 条钓鱼价（低于簇中位 11% 以上）；5 条僵尸挂牌（>180 天且 0 带看）。
+  1 个簇含 2 条钓鱼价（低于簇中位 11% 以上）；5 条僵尸挂牌（>180 天且 0 带看）；
+- 转载记录都带原发布中介与原挂牌编号：48 条能对齐直达记录（只作佐证），
+  24 条对齐不上（留在来源台账 Sources，不进估价清单，补齐后重算才参与）。
 """
 
 DEMO_PASSWORD = "Demo@2026"
@@ -137,13 +140,24 @@ TITLE_SUFFIX = ["满五唯一", "近地铁", "采光好", "随时看房", "业�
 
 COMMUNITY_VARIANTS = ["{c}", "{c} ", " {c}", "{c}（一期）"]
 
-# ---- 簇结构：41 个多成员簇（1×4 + 31×5 + 9×4 = 195 条）+ 345 个单成员簇 = 540 条 ----
+# ---- 渠道口径：5 家中介门店自己发布，4 家平台/数据服务商只转载 ----
+DIRECT_AGENCY_CODES = [agency["code"] for agency in AGENCIES if agency["kind"] == "broker"]
+REPOST_AGENCY_CODES = [agency["code"] for agency in AGENCIES if agency["kind"] != "broker"]
+
+# ---- 簇结构：41 个多成员簇（1×4 + 31×5 + 9×4 = 195 条）+ 345 个单成员簇 = 540 条直达发布 ----
 CLUSTER_SIZES: list[int] = [4] + [5] * 31 + [4] * 9 + [1] * 345
 SPECIAL_SPREAD_CLUSTER = 0
 BAIT_CLUSTER = 1
 STALE_CLUSTER_INDEXES = (50, 120, 210, 300, 350)
 DIRTY_FLOOR_INDEX = 201
 DIRTY_PRICE_INDEX = 202
+
+# 前 32 个簇各多一条同中介重复发布（用于验证「同一中介只算一份报价」）
+DUPLICATE_DIRECT_CLUSTERS = 32
+# 前 48 个簇各挂 1 条可对齐的转载；前 24 个簇各挂 1 条对不齐的转载（留来源台账）
+LINKED_REPOST_CLUSTERS = 48
+UNRESOLVED_REPOST_CLUSTERS = 24
+UNREGISTERED_BROKER_NAME = "信义房屋 · 花木店"
 
 SPECIAL_PRICES = [5_980_000, 6_020_000, 6_060_000, 6_100_000]
 BAIT_PRICES = [5_280_000, 5_320_000, 5_980_000, 6_020_000, 6_060_000]
@@ -183,10 +197,103 @@ def base_price(community_index: int, layout: str, area: float, member_index: int
     return int(round(raw / 10000.0)) * 10000
 
 
+def _broker_codes(index: int, size: int) -> list[str]:
+    """同一簇里按顺序分配互不重复的中介门店；门店数 >= 簇大小，保证一店一价。"""
+    start = index % len(DIRECT_AGENCY_CODES)
+    return [DIRECT_AGENCY_CODES[(start + member) % len(DIRECT_AGENCY_CODES)] for member in range(size)]
+
+
+class _LidCounter:
+    """每个渠道各自递增的挂牌编号，输出形如 LIANJIA-0001。"""
+
+    def __init__(self) -> None:
+        self._seq: dict[str, int] = {}
+
+    def next(self, code: str) -> str:
+        self._seq[code] = self._seq.get(code, 0) + 1
+        return f"{code.upper()}-{self._seq[code]:04d}"
+
+
+def _render_listing(
+    *,
+    code: str,
+    lid: str,
+    slot: int,
+    community: str,
+    layout: str,
+    area: float,
+    price: int,
+    floor: int,
+    floor_total: int,
+    orientation: str,
+    index: int,
+    record_kind: str,
+) -> dict:
+    area_text = f"{area:g}"
+    area_raw = AREA_VARIANTS[slot % len(AREA_VARIANTS)].format(a=area_text, inner=f"{area * 0.8:.1f}")
+    price_raw = PRICE_VARIANTS[slot % len(PRICE_VARIANTS)].format(w=price // 10000, yuan=f"{price:,}")
+    floor_raw_variants = [f"{floor}/{floor_total}", f"{floor}层/共{floor_total}层", f"{floor}层", f"{floor}/{floor_total}"]
+    if floor <= 6 and index % 5 == 4:
+        floor_raw = f"低楼层(共{floor_total}层)"
+    else:
+        floor_raw = floor_raw_variants[slot % len(floor_raw_variants)]
+    orientation_raw = ORIENTATION_VARIANTS[orientation][slot % len(ORIENTATION_VARIANTS[orientation])]
+    layout_raw = (
+        layout
+        if slot % 3 == 0
+        else f"{layout.split('-')[0]}室{layout.split('-')[1]}厅{layout.split('-')[2]}卫"
+        if slot % 3 == 1
+        else LAYOUT_CN[layout]
+    )
+    title = f"{layout} {area_text}平方米 {orientation} {floor}层 {TITLE_SUFFIX[slot % len(TITLE_SUFFIX)]}"
+
+    listed_days = 20 + (slot * 13) % 130
+    views = 1 + (slot * 7) % 23
+    status = "active"
+    if slot % 19 == 5:
+        status = "sold"
+        listed_days = 150 + slot % 45
+        views = 2 + slot % 9
+    elif slot % 41 == 7:
+        status = "off_market"
+
+    if index in STALE_CLUSTER_INDEXES:
+        listed_days = 220 + index % 40
+        views = 0
+    if index == DIRTY_FLOOR_INDEX:
+        floor_raw = "暂无数据"
+    if index == DIRTY_PRICE_INDEX:
+        price_raw = "价格面议"
+
+    return {
+        "agency_code": code,
+        "lid": lid,
+        "record_kind": record_kind,
+        "origin_agency_code": None,
+        "origin_agency_raw": None,
+        "origin_lid": None,
+        "community_raw": COMMUNITY_VARIANTS[slot % len(COMMUNITY_VARIANTS)].format(c=community),
+        "layout_raw": layout_raw,
+        "area_raw": area_raw,
+        "price_raw": price_raw,
+        "floor_raw": floor_raw,
+        "orientation_raw": orientation_raw,
+        "title": title,
+        "status": status,
+        "listed_days": listed_days,
+        "views": views,
+    }
+
+
 def build_listings() -> tuple[list[dict], list[dict]]:
-    """返回 (clusters, listings)；clusters 里带 golden 期望值，便于测试断言。"""
+    """返回 (clusters, listings)；clusters 里带 golden 期望值，便于测试断言。
+
+    ``listings`` 是所有采集记录（含直达、同店重复发布、可对齐转载、待补齐转载）；
+    每条记录都带 ``record_kind`` 与转载所需的 ``origin_agency_*`` / ``origin_lid``。
+    """
     clusters: list[dict] = []
     used_areas: dict = {}
+    lids = _LidCounter()
     slot = 0
     for index, size in enumerate(CLUSTER_SIZES):
         community = community_of(index)
@@ -203,63 +310,105 @@ def build_listings() -> tuple[list[dict], list[dict]]:
         else:
             prices = [max(60_000, base_price(index % len(COMMUNITIES), layout, area, member)) for member in range(size)]
 
+        codes = _broker_codes(index, size)
         members: list[dict] = []
         for member in range(size):
-            agency = AGENCIES[slot % len(AGENCIES)]
-            lid = f"{agency['code'].upper()}-{slot // len(AGENCIES) + 1:04d}"
-            price = prices[member]
-            area_text = f"{area:g}"
-            area_raw = AREA_VARIANTS[slot % len(AREA_VARIANTS)].format(a=area_text, inner=f"{area * 0.8:.1f}")
-            price_raw = PRICE_VARIANTS[slot % len(PRICE_VARIANTS)].format(w=price // 10000, yuan=f"{price:,}")
-            floor_raw_variants = [f"{floor}/{floor_total}", f"{floor}层/共{floor_total}层", f"{floor}层", f"{floor}/{floor_total}"]
-            if floor <= 6 and slot % 5 == 4:
-                floor_raw = f"低楼层(共{floor_total}层)"
-            else:
-                floor_raw = floor_raw_variants[slot % len(floor_raw_variants)]
-            orientation_raw = ORIENTATION_VARIANTS[orientation][slot % len(ORIENTATION_VARIANTS[orientation])]
-            layout_raw = (
-                layout
-                if slot % 3 == 0
-                else f"{layout.split('-')[0]}室{layout.split('-')[1]}厅{layout.split('-')[2]}卫"
-                if slot % 3 == 1
-                else LAYOUT_CN[layout]
-            )
-            title = f"{layout} {area_text}平方米 {orientation} {floor}层 {TITLE_SUFFIX[slot % len(TITLE_SUFFIX)]}"
-
-            listed_days = 20 + (slot * 13) % 130
-            views = 1 + (slot * 7) % 23
-            status = "active"
-            if slot % 19 == 5:
-                status = "sold"
-                listed_days = 150 + slot % 45
-                views = 2 + slot % 9
-            elif slot % 41 == 7:
-                status = "off_market"
-
-            if index in STALE_CLUSTER_INDEXES:
-                listed_days = 220 + index % 40
-                views = 0
-            if index == DIRTY_FLOOR_INDEX:
-                floor_raw = "暂无数据"
-            if index == DIRTY_PRICE_INDEX:
-                price_raw = "价格面议"
-
+            code = codes[member]
             members.append(
-                {
-                    "agency_code": agency["code"],
-                    "lid": lid,
-                    "community_raw": COMMUNITY_VARIANTS[slot % len(COMMUNITY_VARIANTS)].format(c=community),
-                    "layout_raw": layout_raw,
-                    "area_raw": area_raw,
-                    "price_raw": price_raw,
-                    "floor_raw": floor_raw,
-                    "orientation_raw": orientation_raw,
-                    "title": title,
-                    "status": status,
-                    "listed_days": listed_days,
-                    "views": views,
-                }
+                _render_listing(
+                    code=code,
+                    lid=lids.next(code),
+                    slot=slot,
+                    community=community,
+                    layout=layout,
+                    area=area,
+                    price=prices[member],
+                    floor=floor,
+                    floor_total=floor_total,
+                    orientation=orientation,
+                    index=index,
+                    record_kind="direct",
+                )
             )
+            slot += 1
+
+        # 同一中介在一个簇里重复发布一条：报价仍只算一份，成员数会多一条
+        duplicates: list[dict] = []
+        if index < DUPLICATE_DIRECT_CLUSTERS and size > 1:
+            code = codes[0]
+            duplicate = _render_listing(
+                code=code,
+                lid=lids.next(code),
+                slot=slot,
+                community=community,
+                layout=layout,
+                area=area,
+                price=prices[0],
+                floor=floor,
+                floor_total=floor_total,
+                orientation=orientation,
+                index=index,
+                record_kind="direct",
+            )
+            duplicate["status"] = "active"
+            duplicate["listed_days"] = 8 + index % 20
+            duplicate["views"] = 3 + index % 11
+            members.append(duplicate)
+            duplicates.append(duplicate)
+            slot += 1
+
+        reposts: list[dict] = []
+        if index < LINKED_REPOST_CLUSTERS:
+            origin = members[0]
+            code = REPOST_AGENCY_CODES[index % len(REPOST_AGENCY_CODES)]
+            repost = _render_listing(
+                code=code,
+                lid=lids.next(code),
+                slot=slot,
+                community=community,
+                layout=layout,
+                area=area,
+                price=prices[0],
+                floor=floor,
+                floor_total=floor_total,
+                orientation=orientation,
+                index=index,
+                record_kind="repost",
+            )
+            repost["origin_agency_code"] = origin["agency_code"]
+            repost["origin_lid"] = origin["lid"]
+            members.append(repost)
+            reposts.append(repost)
+            slot += 1
+
+        if index < UNRESOLVED_REPOST_CLUSTERS:
+            origin = members[0]
+            code = REPOST_AGENCY_CODES[(index + 1) % len(REPOST_AGENCY_CODES)]
+            repost = _render_listing(
+                code=code,
+                lid=lids.next(code),
+                slot=slot,
+                community=community,
+                layout=layout,
+                area=area,
+                price=prices[0],
+                floor=floor,
+                floor_total=floor_total,
+                orientation=orientation,
+                index=index,
+                record_kind="repost",
+            )
+            if index % 3 == 0:
+                repost["origin_agency_raw"] = UNREGISTERED_BROKER_NAME
+                repost["origin_lid"] = f"XY-{9000 + index:04d}"
+            elif index % 3 == 1:
+                repost["origin_agency_code"] = origin["agency_code"]
+                repost["origin_lid"] = f"{origin['agency_code'].upper()}-9999"
+            else:
+                repost["origin_agency_raw"] = origin["agency_code"]
+                repost["origin_lid"] = None
+            members.append(repost)
+            reposts.append(repost)
             slot += 1
 
         clusters.append(
@@ -273,13 +422,22 @@ def build_listings() -> tuple[list[dict], list[dict]]:
                 "orientation": orientation,
                 "size": size,
                 "prices": prices,
-                "members": members,
+                "brokers": codes,
+                "members": [member for member in members if member["record_kind"] == "direct"],
+                "duplicates": duplicates,
+                "reposts": reposts,
+                "records": members,
             }
         )
-    listings = [member for cluster in clusters for member in cluster["members"]]
-    assert len(listings) == 540, len(listings)
+
+    listings = [record for cluster in clusters for record in cluster["records"]]
+    direct = [row for row in listings if row["record_kind"] == "direct"]
+    reposts = [row for row in listings if row["record_kind"] == "repost"]
+    assert len(direct) == 540 + 32, len(direct)
+    assert len(reposts) == LINKED_REPOST_CLUSTERS + UNRESOLVED_REPOST_CLUSTERS, len(reposts)
     assert len(clusters) == 386, len(clusters)
     assert sum(1 for cluster in clusters if cluster["size"] > 1) == 41
+    assert len({row["agency_code"] for row in direct}) == len(DIRECT_AGENCY_CODES)
     return clusters, listings
 
 

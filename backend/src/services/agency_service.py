@@ -1,7 +1,7 @@
 """中介渠道服务：登记、采集统计、启用状态。"""
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from src.constants.enums import AGENCY_KIND_LABELS
@@ -11,7 +11,13 @@ from src.utils.errors import AppError, not_found
 from src.utils.timeutil import iso_utc
 
 
-def serialize(agency: Agency, listing_count: int = 0, last_listing_at=None) -> dict:
+def serialize(
+    agency: Agency,
+    listing_count: int = 0,
+    last_listing_at=None,
+    quote_count: int = 0,
+    repost_count: int = 0,
+) -> dict:
     return {
         "id": agency.id,
         "code": agency.code,
@@ -24,6 +30,8 @@ def serialize(agency: Agency, listing_count: int = 0, last_listing_at=None) -> d
         "config": agency.config or {},
         "enabled": agency.enabled,
         "listing_count": listing_count,
+        "quote_count": quote_count,
+        "repost_count": repost_count,
         "last_synced_at": iso_utc(agency.last_synced_at),
         "last_listing_at": iso_utc(last_listing_at),
         "created_at": iso_utc(agency.created_at),
@@ -32,9 +40,23 @@ def serialize(agency: Agency, listing_count: int = 0, last_listing_at=None) -> d
 
 def listing_stats(db: Session) -> dict[int, dict]:
     rows = db.execute(
-        select(Listing.agency_id, func.count(Listing.id), func.max(Listing.captured_at)).group_by(Listing.agency_id)
+        select(
+            Listing.agency_id,
+            func.count(Listing.id),
+            func.max(Listing.captured_at),
+            func.sum(case((Listing.is_quote.is_(True), 1), else_=0)),
+            func.sum(case((Listing.record_kind == "repost", 1), else_=0)),
+        ).group_by(Listing.agency_id)
     ).all()
-    return {agency_id: {"count": count, "last_at": last_at} for agency_id, count, last_at in rows}
+    return {
+        agency_id: {
+            "count": count,
+            "last_at": last_at,
+            "quote_count": int(quote_count or 0),
+            "repost_count": int(repost_count or 0),
+        }
+        for agency_id, count, last_at, quote_count, repost_count in rows
+    }
 
 
 def list_agencies(
@@ -62,7 +84,14 @@ def list_agencies(
     stats = listing_stats(db)
     return {
         "items": [
-            serialize(row, stats.get(row.id, {}).get("count", 0), stats.get(row.id, {}).get("last_at")) for row in rows
+            serialize(
+                row,
+                stats.get(row.id, {}).get("count", 0),
+                stats.get(row.id, {}).get("last_at"),
+                stats.get(row.id, {}).get("quote_count", 0),
+                stats.get(row.id, {}).get("repost_count", 0),
+            )
+            for row in rows
         ],
         "total": total,
         "limit": limit,

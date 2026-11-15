@@ -1,4 +1,10 @@
-"""房源簇服务：列表、成员对照、golden record 与风险详情。"""
+"""房源簇服务：列表、成员对照、golden record 与风险详情。
+
+详情页的两条口径：
+- ``members``：簇内全部直达记录（含同中介重复发布），标明哪一条被采用为报价；
+- ``quotes``：按中介聚合的「采用发布」，每家一条，并挂上对齐到它的转载记录
+  （``reposts``），可以从房源详情一路追到每个中介采用的发布和相应转载。
+"""
 from __future__ import annotations
 
 from sqlalchemy import func, or_, select
@@ -31,6 +37,10 @@ def serialize(prop: Property, agency_names: list[str] | None = None) -> dict:
         "spread_wan": round(prop.spread / 10000, 1),
         "dispersion": prop.dispersion,
         "agency_count": prop.agency_count,
+        "quote_count": prop.quote_count,
+        "direct_count": prop.direct_count,
+        "linked_repost_count": prop.linked_repost_count,
+        "record_count": prop.record_count,
         "member_count": prop.member_count,
         "confidence": prop.confidence,
         "risk_score": prop.risk_score,
@@ -46,10 +56,11 @@ def serialize(prop: Property, agency_names: list[str] | None = None) -> dict:
 
 
 def _agency_names_by_property(db: Session) -> dict[int, list[str]]:
+    """簇的主档中介名：只算被采用为报价的直达记录（转载渠道不冒充中介）。"""
     rows = db.execute(
         select(Listing.property_id, Agency.name)
         .join(Agency, Agency.id == Listing.agency_id)
-        .where(Listing.property_id.is_not(None))
+        .where(Listing.property_id.is_not(None), Listing.is_quote.is_(True))
         .distinct()
     ).all()
     grouped: dict[int, list[str]] = {}
@@ -83,9 +94,11 @@ def list_properties(
     if tag:
         conditions.append(Property.risk_tags.like(f'%"{tag}"%'))
     if multi:
-        conditions.append(Property.member_count > 1)
+        conditions.append(Property.quote_count > 1)
     if agency_id:
-        subquery = select(Listing.property_id).where(Listing.agency_id == agency_id, Listing.property_id.is_not(None))
+        subquery = select(Listing.property_id).where(
+            Listing.agency_id == agency_id, Listing.property_id.is_not(None)
+        )
         conditions.append(Property.id.in_(subquery))
     for condition in conditions:
         stmt = stmt.where(condition)
@@ -93,7 +106,7 @@ def list_properties(
     order = {
         "risk": (Property.risk_score.desc(), Property.id.asc()),
         "spread": (Property.spread.desc(), Property.id.asc()),
-        "members": (Property.member_count.desc(), Property.id.asc()),
+        "members": (Property.quote_count.desc(), Property.id.asc()),
         "recent": (Property.updated_at.desc(), Property.id.asc()),
     }.get(sort, (Property.risk_score.desc(), Property.id.asc()))
     total = db.scalar(count_stmt) or 0
@@ -114,17 +127,68 @@ def get_property(db: Session, property_id: int) -> dict:
     names = _agency_names_by_property(db)
     payload = serialize(prop, names.get(prop.id, []))
     listings = db.scalars(select(Listing).where(Listing.property_id == prop.id).order_by(Listing.id)).all()
-    agencies = {agency.id: agency for agency in db.scalars(select(Agency)).all()}
+    context = listing_service._context(db)
+    agencies = context.agencies
     median = prop.price_median or 0
+
     members = []
+    quotes: dict[int, dict] = {}
     for listing in listings:
-        item = listing_service.serialize(listing, agencies.get(listing.agency_id), prop)
+        if listing.record_kind != "direct":
+            continue
+        item = context.serialize(listing)
         price = listing.price_num or 0
         item["price_deviation"] = round((price - median) / median, 4) if median and price else 0.0
         item["is_bait"] = "bait" in (listing.risk_tags or [])
         item["is_stale"] = "stale" in (listing.risk_tags or [])
         members.append(item)
+        if listing.is_quote:
+            quotes[listing.id] = {
+                "listing_id": listing.id,
+                "agency_id": listing.agency_id,
+                "agency_name": agencies[listing.agency_id].name if listing.agency_id in agencies else "",
+                "agency_code": agencies[listing.agency_id].code if listing.agency_id in agencies else "",
+                "lid": listing.lid,
+                "price_num": listing.price_num,
+                "price_raw": listing.price_raw,
+                "status": listing.status,
+                "reposts": [],
+            }
+
+    reposts = []
+    for listing in listings:
+        if listing.record_kind != "repost":
+            continue
+        item = context.serialize(listing)
+        reposts.append(item)
+        prov = item["provenance"]
+        source_listing = context.listing(listing.source_listing_id)
+        # 转载挂到「它所指向的原发布中介」在本簇被采用的那份报价上；
+        # 若指向的是该中介更早的一条重复发布，也归到同一中介名下并标明原编号。
+        target_agency_id = source_listing.agency_id if source_listing else listing.origin_agency_id
+        target = next(
+            (quote for quote in quotes.values() if quote["agency_id"] == target_agency_id),
+            None,
+        )
+        if target is not None and prov["status"] == "linked":
+            target["reposts"].append(
+                {
+                    "listing_id": listing.id,
+                    "agency_name": agencies[listing.agency_id].name if listing.agency_id in agencies else "",
+                    "lid": listing.lid,
+                    "status_label": prov["status_label"],
+                    "source_lid": source_listing.lid if source_listing else None,
+                    "is_adopted_source": bool(source_listing and source_listing.is_quote),
+                    "price_num": listing.price_num,
+                }
+            )
+
     payload["members"] = members
+    payload["quotes"] = [quotes[key] for key in sorted(quotes)]
+    payload["reposts"] = reposts
+    payload["unresolved_reposts"] = [
+        item for item in reposts if item["provenance"]["status"] == "unresolved"
+    ]
     return payload
 
 
